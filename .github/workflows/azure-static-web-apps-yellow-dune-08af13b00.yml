@@ -23,8 +23,15 @@ jobs:
           lfs: false
       - name: Validate deployment token
         run: |
-          if [ -z "${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}" ]; then
+          TOKEN="${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}"
+          if [ -z "$TOKEN" ]; then
             echo "AZURE_STATIC_WEB_APPS_API_TOKEN is empty or not accessible in this job. Add it in Repository Secrets."
+            exit 1
+          fi
+          LEN=${#TOKEN}
+          echo "Deployment token length: $LEN"
+          if [ "$LEN" -lt 80 ]; then
+            echo "AZURE_STATIC_WEB_APPS_API_TOKEN looks too short. Re-paste token from Azure Portal without quotes/spaces/newlines."
             exit 1
           fi
       - name: Build And Deploy
