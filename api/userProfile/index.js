@@ -1,9 +1,26 @@
 import { app } from '@azure/functions';
 import { CosmosClient } from '@azure/cosmos';
 
-function getContainer() {
-  const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
+const memoryProfiles = new Map();
+
+function getContainerOrNull() {
+  const connectionString = process.env.COSMOS_CONNECTION_STRING;
+  if (!connectionString) {
+    return null;
+  }
+
+  const client = new CosmosClient(connectionString);
   return client.database('trialquest-db').container('userProfile');
+}
+
+async function readProfile(container, userId) {
+  const querySpec = {
+    query: 'SELECT TOP 1 * FROM c WHERE c.id = @userId OR c.userId = @userId',
+    parameters: [{ name: '@userId', value: userId }],
+  };
+
+  const { resources } = await container.items.query(querySpec).fetchAll();
+  return resources[0] || null;
 }
 
 const corsHeaders = {
@@ -19,6 +36,7 @@ app.http('userProfile', {
   route: 'userProfile/{userId}',
   handler: async (request, context) => {
     const userId = request.params.userId;
+    const container = getContainerOrNull();
 
     if (request.method === 'OPTIONS') {
       return { status: 204, headers: corsHeaders };
@@ -26,7 +44,7 @@ app.http('userProfile', {
 
     try {
       if (request.method === 'GET') {
-        const { resource } = await getContainer().item(userId, userId).read();
+        const resource = container ? await readProfile(container, userId) : memoryProfiles.get(userId) || null;
         if (!resource) {
           return {
             status: 404,
@@ -45,6 +63,7 @@ app.http('userProfile', {
         const body = await request.json().catch(() => ({}));
         const newProfile = {
           id: userId,
+          userId,
           skills: { health: 1, knowledge: 1, relationship: 1, action: 1, creation: 1 },
           mtbi: body.mtbi || null,
           mtbiHistory: body.mtbi
@@ -52,7 +71,13 @@ app.http('userProfile', {
             : [],
           lastUpdated: new Date().toISOString(),
         };
-        await getContainer().items.create(newProfile);
+
+        if (container) {
+          await container.items.upsert(newProfile);
+        } else {
+          memoryProfiles.set(userId, newProfile);
+        }
+
         return {
           status: 201,
           body: JSON.stringify(newProfile),
@@ -62,7 +87,7 @@ app.http('userProfile', {
 
       if (request.method === 'POST' || request.method === 'PATCH') {
         const body = await request.json();
-        const { resource } = await getContainer().item(userId, userId).read();
+        const resource = container ? await readProfile(container, userId) : memoryProfiles.get(userId) || null;
         if (!resource) {
           return {
             status: 404,
@@ -82,8 +107,15 @@ app.http('userProfile', {
           resource.mtbiHistory.push({ values: body.mtbi, recordedAt: new Date().toISOString() });
         }
 
+        resource.userId = userId;
         resource.lastUpdated = new Date().toISOString();
-        await getContainer().item(userId, userId).replace(resource);
+
+        if (container) {
+          await container.items.upsert(resource);
+        } else {
+          memoryProfiles.set(userId, resource);
+        }
+
         return {
           status: 200,
           body: JSON.stringify(resource),
@@ -100,7 +132,7 @@ app.http('userProfile', {
       context.error('userProfile handler error:', err);
       return {
         status: 500,
-        body: JSON.stringify({ error: 'Internal server error' }),
+        body: JSON.stringify({ error: err?.message || 'Internal server error' }),
         headers: corsHeaders,
       };
     }
