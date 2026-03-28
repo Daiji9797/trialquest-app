@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@azure/cosmos": "^4.6.0"
+    "@azure/cosmos": "^4.6.0",
+    "@azure/functions": "^4.5.0"
   }
 }
