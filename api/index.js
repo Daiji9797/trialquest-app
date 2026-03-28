@@ -2,6 +2,7 @@ import { app } from '@azure/functions';
 import './questions/index.js';
 import './answers/index.js';
 import './userProfile/index.js';
+import './agentSuggestions/index.js';
 
 // Diagnostic endpoint - no DB dependency
 app.http('health', {
