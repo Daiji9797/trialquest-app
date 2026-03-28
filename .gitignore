@@ -8,7 +8,6 @@ frontend/node_modules/
 .env.*.local
 
 # Build outputs
-frontend/build/
 
 # Temporary files and folders
 tmp/

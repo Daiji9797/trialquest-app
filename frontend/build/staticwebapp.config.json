@@ -1,0 +1,13 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/api/*",
+      "/static/*",
+      "*.{css,js,png,ico,svg,jpg,jpeg,gif,webp,woff,woff2,ttf,eot}"
+    ]
+  },
+  "globalHeaders": {
+    "Cache-Control": "no-store"
+  }
+}
