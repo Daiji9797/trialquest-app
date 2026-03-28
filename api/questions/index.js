@@ -1,8 +1,10 @@
 import { app } from '@azure/functions';
 import { CosmosClient } from '@azure/cosmos';
 
-const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
-const container = client.database('trialquest-db').container('questions');
+function getContainer() {
+  const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
+  return client.database('trialquest-db').container('questions');
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,7 +34,7 @@ app.http('questions', {
         querySpec = { query: 'SELECT * FROM c' };
       }
 
-      const { resources } = await container.items.query(querySpec).fetchAll();
+      const { resources } = await getContainer().items.query(querySpec).fetchAll();
       return {
         status: 200,
         body: JSON.stringify(resources),

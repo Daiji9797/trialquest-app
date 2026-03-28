@@ -1,8 +1,10 @@
 import { app } from '@azure/functions';
 import { CosmosClient } from '@azure/cosmos';
 
-const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
-const container = client.database('trialquest-db').container('userProfile');
+function getContainer() {
+  const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
+  return client.database('trialquest-db').container('userProfile');
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +26,7 @@ app.http('userProfile', {
 
     try {
       if (request.method === 'GET') {
-        const { resource } = await container.item(userId, userId).read();
+        const { resource } = await getContainer().item(userId, userId).read();
         if (!resource) {
           return {
             status: 404,
@@ -50,7 +52,7 @@ app.http('userProfile', {
             : [],
           lastUpdated: new Date().toISOString(),
         };
-        await container.items.create(newProfile);
+        await getContainer().items.create(newProfile);
         return {
           status: 201,
           body: JSON.stringify(newProfile),
@@ -60,7 +62,7 @@ app.http('userProfile', {
 
       if (request.method === 'POST' || request.method === 'PATCH') {
         const body = await request.json();
-        const { resource } = await container.item(userId, userId).read();
+        const { resource } = await getContainer().item(userId, userId).read();
         if (!resource) {
           return {
             status: 404,
@@ -81,7 +83,7 @@ app.http('userProfile', {
         }
 
         resource.lastUpdated = new Date().toISOString();
-        await container.item(userId, userId).replace(resource);
+        await getContainer().item(userId, userId).replace(resource);
         return {
           status: 200,
           body: JSON.stringify(resource),

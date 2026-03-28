@@ -1,8 +1,10 @@
 import { app } from '@azure/functions';
 import { CosmosClient } from '@azure/cosmos';
 
-const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
-const container = client.database('trialquest-db').container('answers');
+function getContainer() {
+  const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
+  return client.database('trialquest-db').container('answers');
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +26,7 @@ app.http('answers', {
       if (request.method === 'POST') {
         const body = await request.json();
         body.createdAt = new Date().toISOString();
-        await container.items.create(body);
+        await getContainer().items.create(body);
         return {
           status: 201,
           body: JSON.stringify(body),
@@ -38,7 +40,7 @@ app.http('answers', {
           query: 'SELECT * FROM c WHERE c.userId = @userId',
           parameters: [{ name: '@userId', value: userId }],
         };
-        const { resources } = await container.items.query(querySpec).fetchAll();
+        const { resources } = await getContainer().items.query(querySpec).fetchAll();
         return {
           status: 200,
           body: JSON.stringify(resources),
