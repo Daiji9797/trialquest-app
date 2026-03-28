@@ -14,7 +14,6 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
-    environment: pro
     permissions:
        contents: read
     steps:
@@ -25,7 +24,7 @@ jobs:
       - name: Validate deployment token
         run: |
           if [ -z "${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}" ]; then
-            echo "AZURE_STATIC_WEB_APPS_API_TOKEN is empty or not accessible in this job."
+            echo "AZURE_STATIC_WEB_APPS_API_TOKEN is empty or not accessible in this job. Add it in Repository Secrets."
             exit 1
           fi
       - name: Build And Deploy
@@ -45,7 +44,6 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
     name: Close Pull Request Job
-    environment: pro
     steps:
       - name: Close Pull Request
         id: closepullrequest
