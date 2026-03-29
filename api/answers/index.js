@@ -13,6 +13,10 @@ const corsHeaders = {
   'Content-Type': 'application/json',
 };
 
+function makeAnswerId(userId, questionId) {
+  return `${String(userId)}:${String(questionId)}`;
+}
+
 app.http('answers', {
   methods: ['GET', 'POST', 'OPTIONS'],
   authLevel: 'anonymous',
@@ -25,20 +29,61 @@ app.http('answers', {
     try {
       if (request.method === 'POST') {
         const body = await request.json();
-        body.createdAt = new Date().toISOString();
-        await getContainer().items.create(body);
+        const userId = body?.userId;
+        const questionId = body?.questionId;
+        const answerText = body?.answer;
+
+        if (!userId || !questionId || typeof answerText !== 'string') {
+          return {
+            status: 400,
+            body: JSON.stringify({
+              error: 'userId, questionId, and answer(string) are required',
+            }),
+            headers: corsHeaders,
+          };
+        }
+
+        const now = new Date().toISOString();
+        const resource = {
+          id: makeAnswerId(userId, questionId),
+          userId,
+          questionId,
+          questionTitle: body?.questionTitle || '',
+          question: body?.question || '',
+          answer: answerText,
+          createdAt: body?.createdAt || now,
+          updatedAt: now,
+        };
+
+        await getContainer().items.upsert(resource);
         return {
-          status: 201,
-          body: JSON.stringify(body),
+          status: 200,
+          body: JSON.stringify(resource),
           headers: corsHeaders,
         };
       }
 
       if (request.method === 'GET') {
         const userId = request.query.get('userId');
+        if (!userId) {
+          return {
+            status: 400,
+            body: JSON.stringify({ error: 'userId query is required' }),
+            headers: corsHeaders,
+          };
+        }
+
+        const questionId = request.query.get('questionId');
         const querySpec = {
-          query: 'SELECT * FROM c WHERE c.userId = @userId',
-          parameters: [{ name: '@userId', value: userId }],
+          query: questionId
+            ? 'SELECT * FROM c WHERE c.userId = @userId AND c.questionId = @questionId'
+            : 'SELECT * FROM c WHERE c.userId = @userId',
+          parameters: questionId
+            ? [
+                { name: '@userId', value: userId },
+                { name: '@questionId', value: questionId },
+              ]
+            : [{ name: '@userId', value: userId }],
         };
         const { resources } = await getContainer().items.query(querySpec).fetchAll();
         return {
