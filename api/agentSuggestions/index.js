@@ -45,6 +45,11 @@ const AGENT_CONFIG = [
   },
 ];
 
+function isAzureFoundryUrl(url) {
+  if (!url) return false;
+  return /\.services\.ai\.azure\.com|\.openai\.azure\.com/i.test(url);
+}
+
 function normalizeAgentResponse(payload) {
   if (!payload) return '';
   if (typeof payload === 'string') return payload;
@@ -63,8 +68,13 @@ async function invokeAgent(config, input) {
   const url = process.env[config.urlEnv];
   if (!url) return null;
 
-  const apiKey = process.env[config.keyEnv];
-  const apiKeyHeader = process.env[config.headerEnv] || 'x-api-key';
+  const apiKey =
+    process.env[config.keyEnv] ||
+    process.env.AZURE_FOUNDRY_KEY ||
+    process.env.FOUNDRY_API_KEY ||
+    null;
+  const apiKeyHeader =
+    process.env[config.headerEnv] || (isAzureFoundryUrl(url) ? 'api-key' : 'x-api-key');
 
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) {
@@ -121,7 +131,7 @@ app.http('agentSuggestions', {
           headers: corsHeaders,
           body: JSON.stringify({
             error: 'No agent endpoint configured',
-            requiredEnvExamples: ['AGENT_ACTION_URL', 'AGENT_ACTION_KEY'],
+            requiredEnvExamples: ['AGENT_ACTION_URL', 'AGENT_ACTION_KEY or AZURE_FOUNDRY_KEY'],
           }),
         };
       }
