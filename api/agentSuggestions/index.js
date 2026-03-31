@@ -123,14 +123,23 @@ app.http('agentSuggestions', {
       const mtbi = body?.mtbi || null;
       const answers = Array.isArray(body?.answers) ? body.answers : [];
       const userId = body?.userId || null;
+      const requestedContinents = Array.isArray(body?.continents)
+        ? new Set(body.continents.map((x) => String(x)))
+        : null;
 
-      const activeAgents = AGENT_CONFIG.filter((cfg) => !!process.env[cfg.urlEnv]);
+      const activeAgents = AGENT_CONFIG.filter(
+        (cfg) =>
+          !!process.env[cfg.urlEnv] &&
+          (!requestedContinents || requestedContinents.has(cfg.key))
+      );
       if (activeAgents.length === 0) {
         return {
           status: 400,
           headers: corsHeaders,
           body: JSON.stringify({
-            error: 'No agent endpoint configured',
+            error: requestedContinents
+              ? 'No selected agent endpoint configured'
+              : 'No agent endpoint configured',
             requiredEnvExamples: ['AGENT_ACTION_URL', 'AGENT_ACTION_KEY or AZURE_FOUNDRY_KEY'],
           }),
         };
