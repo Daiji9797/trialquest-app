@@ -64,6 +64,64 @@ function normalizeAgentResponse(payload) {
   return JSON.stringify(payload);
 }
 
+async function invokeConductor(url, input) {
+  const apiKey =
+    process.env.CONDUCTOR_KEY ||
+    process.env.AZURE_FOUNDRY_KEY ||
+    process.env.FOUNDRY_API_KEY ||
+    null;
+  const apiKeyHeader = isAzureFoundryUrl(url) ? 'api-key' : 'x-api-key';
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) {
+    headers[apiKeyHeader] = apiKey;
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      userId: input.userId,
+      mtbi: input.mtbi,
+      answers: input.answers,
+      continents: input.continents,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`conductor error: ${response.status} ${text}`.trim());
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  const payload = contentType.includes('application/json')
+    ? await response.json()
+    : await response.text();
+
+  // {suggestions: [{name, action}, ...]}
+  if (payload?.suggestions && Array.isArray(payload.suggestions)) {
+    return payload.suggestions;
+  }
+  // [{name, action}, ...]
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  // プレーンテキスト or その他 → 文字列として1件の提案に変換
+  const text = normalizeAgentResponse(payload);
+  // コンダクターが JSON 文字列を返す場合も考慮してパース試行
+  if (text) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed?.suggestions && Array.isArray(parsed.suggestions)) return parsed.suggestions;
+    } catch {
+      // パース失敗は無視
+    }
+    return [{ name: 'コンシェルジュ', action: text }];
+  }
+  return [];
+}
+
 async function invokeAgent(config, input) {
   const url = process.env[config.urlEnv];
   if (!url) return null;
@@ -126,6 +184,26 @@ app.http('agentSuggestions', {
       const requestedContinents = Array.isArray(body?.continents)
         ? new Set(body.continents.map((x) => String(x)))
         : null;
+
+      // コンダクター（council-agent）が設定されている場合は優先して呼び出す
+      const conductorUrl = process.env.CONDUCTOR_URL;
+      if (conductorUrl) {
+        try {
+          const suggestions = await invokeConductor(conductorUrl, {
+            userId,
+            mtbi,
+            answers,
+            continents: requestedContinents ? [...requestedContinents] : [],
+          });
+          return {
+            status: 200,
+            headers: corsHeaders,
+            body: JSON.stringify({ suggestions }),
+          };
+        } catch (err) {
+          context.warn('conductor invoke failed, falling back to individual agents:', err.message);
+        }
+      }
 
       const activeAgents = AGENT_CONFIG.filter(
         (cfg) =>
