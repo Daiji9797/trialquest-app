@@ -31,7 +31,7 @@ var fetchSuggestions=function(mtbi,ans,conts){
 if(!mtbi)return void setSuggestions([]);
 var cc=conts&&conts.length>0?conts:[];
 if(cc.length===0)return void setSuggestions([]);
-return fetch(Lt("/agentSuggestions"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:E,mtbi:mtbi,answers:ans,continents:cc})}).then(function(res){if(!res.ok)throw new Error("err");return res.json()}).then(function(data){if(Array.isArray(data&&data.suggestions)&&data.suggestions.length>0){setSuggestions(data.suggestions)}else{setSuggestions(fallback(mtbi,ans,cc))}}).catch(function(){setSuggestions(fallback(mtbi,ans,cc))});
+return fetch("https://trialquest-functions-dacgaqg7ajbrdegf.japanwest-01.azurewebsites.net/api/agentSuggestions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:E,mtbi:mtbi,answers:ans,continents:cc})}).then(function(res){if(!res.ok)throw new Error("err");return res.json()}).then(function(data){if(Array.isArray(data&&data.suggestions)&&data.suggestions.length>0){setSuggestions(data.suggestions)}else{setSuggestions(fallback(mtbi,ans,cc))}}).catch(function(){setSuggestions(fallback(mtbi,ans,cc))});
 };
 
 (0,r.useEffect)(function(){
