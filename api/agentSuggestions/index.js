@@ -11,37 +11,37 @@ const AGENT_CONFIG = [
   {
     key: 'health',
     name: '健康大陸',
-    urlEnv: 'AGENT_HEALTH_URL',
-    keyEnv: 'AGENT_HEALTH_KEY',
-    headerEnv: 'AGENT_HEALTH_KEY_HEADER',
+    urlEnv: 'HEALTH_AGENT_URL',
+    keyEnv: 'HEALTH_AGENT_KEY',
+    headerEnv: 'HEALTH_AGENT_KEY_HEADER',
   },
   {
     key: 'knowledge',
     name: '知識大陸',
-    urlEnv: 'AGENT_KNOWLEDGE_URL',
-    keyEnv: 'AGENT_KNOWLEDGE_KEY',
-    headerEnv: 'AGENT_KNOWLEDGE_KEY_HEADER',
+    urlEnv: 'KNOWLEDGE_AGENT_URL',
+    keyEnv: 'KNOWLEDGE_AGENT_KEY',
+    headerEnv: 'KNOWLEDGE_AGENT_KEY_HEADER',
   },
   {
     key: 'relationship',
     name: '関係大陸',
-    urlEnv: 'AGENT_RELATIONSHIP_URL',
-    keyEnv: 'AGENT_RELATIONSHIP_KEY',
-    headerEnv: 'AGENT_RELATIONSHIP_KEY_HEADER',
+    urlEnv: 'RELATIONSHIP_AGENT_URL',
+    keyEnv: 'RELATIONSHIP_AGENT_KEY',
+    headerEnv: 'RELATIONSHIP_AGENT_KEY_HEADER',
   },
   {
     key: 'action',
     name: '行動大陸',
-    urlEnv: 'AGENT_ACTION_URL',
-    keyEnv: 'AGENT_ACTION_KEY',
-    headerEnv: 'AGENT_ACTION_KEY_HEADER',
+    urlEnv: 'ACTION_AGENT_URL',
+    keyEnv: 'ACTION_AGENT_KEY',
+    headerEnv: 'ACTION_AGENT_KEY_HEADER',
   },
   {
     key: 'creation',
     name: '創造大陸',
-    urlEnv: 'AGENT_CREATION_URL',
-    keyEnv: 'AGENT_CREATION_KEY',
-    headerEnv: 'AGENT_CREATION_KEY_HEADER',
+    urlEnv: 'CREATION_AGENT_URL',
+    keyEnv: 'CREATION_AGENT_KEY',
+    headerEnv: 'CREATION_AGENT_KEY_HEADER',
   },
 ];
 
@@ -186,7 +186,7 @@ app.http('agentSuggestions', {
         : null;
 
       // コンダクター（council-agent）が設定されている場合は優先して呼び出す
-      const conductorUrl = process.env.CONDUCTOR_URL;
+      const conductorUrl = process.env.CONDUCTOR_URL || process.env.COUNCIL_AGENT_URL;
       if (conductorUrl) {
         try {
           const suggestions = await invokeConductor(conductorUrl, {
