@@ -187,6 +187,7 @@ app.http('agentSuggestions', {
 
       // コンダクター（council-agent）が設定されている場合は優先して呼び出す
       const conductorUrl = process.env.CONDUCTOR_URL || process.env.COUNCIL_AGENT_URL;
+      context.log('conductorUrl:', conductorUrl ? conductorUrl.substring(0, 60) + '...' : 'NOT SET');
       if (conductorUrl) {
         try {
           const suggestions = await invokeConductor(conductorUrl, {
@@ -198,10 +199,16 @@ app.http('agentSuggestions', {
           return {
             status: 200,
             headers: corsHeaders,
-            body: JSON.stringify({ suggestions }),
+            body: JSON.stringify({ suggestions, _source: 'conductor' }),
           };
         } catch (err) {
           context.warn('conductor invoke failed, falling back to individual agents:', err.message);
+          // Return conductor error for debugging
+          return {
+            status: 200,
+            headers: corsHeaders,
+            body: JSON.stringify({ suggestions: [], _conductorError: err.message }),
+          };
         }
       }
 
