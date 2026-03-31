@@ -134,14 +134,9 @@ app.http('agentSuggestions', {
       );
       if (activeAgents.length === 0) {
         return {
-          status: 400,
+          status: 200,
           headers: corsHeaders,
-          body: JSON.stringify({
-            error: requestedContinents
-              ? 'No selected agent endpoint configured'
-              : 'No agent endpoint configured',
-            requiredEnvExamples: ['AGENT_ACTION_URL', 'AGENT_ACTION_KEY or AZURE_FOUNDRY_KEY'],
-          }),
+          body: JSON.stringify({ suggestions: [] }),
         };
       }
 
@@ -165,9 +160,9 @@ app.http('agentSuggestions', {
 
       if (suggestions.length === 0) {
         return {
-          status: 502,
+          status: 200,
           headers: corsHeaders,
-          body: JSON.stringify({ error: 'All configured agents failed', details: errors }),
+          body: JSON.stringify({ suggestions: [], errors }),
         };
       }
 
