@@ -39,16 +39,41 @@ async function getAgentDefinition(continentKey, context) {
   const token = await getManagedIdentityToken('https://ai.azure.com', context);
   if (!token) throw new Error('MI token failed for agent definition fetch');
 
+  let agentData = null;
+
+  // Try direct fetch by agent name
   const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-  if (!res.ok) throw new Error('Agent fetch failed: ' + res.status);
-  const data = await res.json();
-  if (context) context.log('Agent API raw keys for', agentName, ':', Object.keys(data).join(','));
-  // Foundry Agents API returns instructions at top level; fall back to legacy nested path
-  const instructions = data.instructions
-    || (data.versions && data.versions.latest && data.versions.latest.definition && data.versions.latest.definition.instructions)
+  if (res.ok) {
+    agentData = await res.json();
+    if (context) context.log('Agent direct fetch OK for', agentName, 'keys:', Object.keys(agentData).join(','));
+  } else {
+    const errText = await res.text().catch(() => '');
+    if (context) context.log('Agent direct fetch failed', res.status, errText.substring(0, 300));
+    // Fallback: list all agents and find by name
+    const listUrl = baseEndpoint + '/api/projects/' + projectName + '/agents?api-version=2025-05-15-preview';
+    const listRes = await fetch(listUrl, { headers: { Authorization: 'Bearer ' + token } });
+    if (listRes.ok) {
+      const listData = await listRes.json();
+      if (context) context.log('Agent list keys:', Object.keys(listData).join(','));
+      const agents = listData.value || listData.data || listData.agents || listData.items || [];
+      if (context) context.log('Agent list count:', agents.length, 'names:', agents.slice(0,10).map(a => a.name || a.id).join(','));
+      agentData = agents.find(a => a.name === agentName) || null;
+      if (!agentData) {
+        if (context) context.log('Agent not found by name. Available names:', agents.map(a => a.name).join(','));
+        throw new Error('Agent not found in list: ' + agentName);
+      }
+    } else {
+      const listErr = await listRes.text().catch(() => '');
+      if (context) context.log('Agent list also failed', listRes.status, listErr.substring(0, 200));
+      throw new Error('Agent fetch failed: ' + res.status);
+    }
+  }
+
+  const instructions = agentData.instructions
+    || (agentData.versions && agentData.versions.latest && agentData.versions.latest.definition && agentData.versions.latest.definition.instructions)
     || '';
-  const model = data.model
-    || (data.versions && data.versions.latest && data.versions.latest.definition && data.versions.latest.definition.model)
+  const model = agentData.model
+    || (agentData.versions && agentData.versions.latest && agentData.versions.latest.definition && agentData.versions.latest.definition.model)
     || '';
   if (context) context.log('Fetched definition for', agentName, 'model=', model, 'instructions.len=', instructions.length);
   const entry = { instructions, model, ts: Date.now() };
