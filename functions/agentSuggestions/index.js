@@ -42,9 +42,14 @@ async function getAgentDefinition(continentKey, context) {
   const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
   if (!res.ok) throw new Error('Agent fetch failed: ' + res.status);
   const data = await res.json();
-  const def = (data.versions && data.versions.latest && data.versions.latest.definition) || {};
-  const instructions = def.instructions || '';
-  const model        = def.model        || '';
+  if (context) context.log('Agent API raw keys for', agentName, ':', Object.keys(data).join(','));
+  // Foundry Agents API returns instructions at top level; fall back to legacy nested path
+  const instructions = data.instructions
+    || (data.versions && data.versions.latest && data.versions.latest.definition && data.versions.latest.definition.instructions)
+    || '';
+  const model = data.model
+    || (data.versions && data.versions.latest && data.versions.latest.definition && data.versions.latest.definition.model)
+    || '';
   if (context) context.log('Fetched definition for', agentName, 'model=', model, 'instructions.len=', instructions.length);
   const entry = { instructions, model, ts: Date.now() };
   _agentCache[continentKey] = entry;
