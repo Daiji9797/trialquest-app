@@ -148,69 +148,149 @@ async function getManagedIdentityToken(resource, context) {
   return data.access_token || null;
 }
 
-// 単一大陸: Foundry からエージェント定義（instructions + model）を取得して Chat Completions で実行
-async function callSingleAgent(continentKey, input, context, _debug) {
+// 単一大陸: Foundry Thread+Run API でエージェントを直接実行（システムプロンプトはFoundry設定を自動使用）
+async function callSingleAgentViaThreadRun(continentKey, input, context, _debug) {
   const baseEndpoint = process.env.OPENAI_ENDPOINT || 'https://trialquestopenai.services.ai.azure.com';
-
-  // Foundry エージェント定義から instructions と model を取得（5分キャッシュ）
-  let systemPrompt = null;
-  try {
-    const agentDef = await getAgentDefinition(continentKey, context);
-    systemPrompt = agentDef.instructions || null;
-    if (_debug) _debug.push('instructions:' + (systemPrompt ? 'from-foundry:len=' + systemPrompt.length : 'empty'));
-  } catch (e) {
-    if (context) context.log('[single] getAgentDefinition error:', e.message);
-    if (_debug) _debug.push('instructions-fetch-error:' + e.message);
-  }
-  if (!systemPrompt) {
-    if (context) context.log('[single] No Foundry instructions for', continentKey, '- using default prompt');
-    if (_debug) _debug.push('instructions:default-fallback');
-    systemPrompt = 'あなたは' + (CONTINENT_NAMES[continentKey] || continentKey) + 'のAIエージェントです。ユーザーのMBTIタイプと質問への回答をもとに、具体的で実行しやすい行動提案を3つ考えてください。必ずJSON配列 [{"name":"大陸名","action":"提案内容"},...] の形式のみで返してください。余分な説明は不要です。';
-  }
-
-  // Foundry 定義の model を優先し、未設定の場合は env var / デフォルト値にフォールバック
-  const deployment = agentDef.model || process.env.CHAT_DEPLOYMENT || 'gpt-4o-mini';
-  const url = baseEndpoint + '/openai/deployments/' + deployment + '/chat/completions?api-version=2024-12-01-preview';
-
+  const projectName  = process.env.FOUNDRY_PROJECT  || 'trialquestopenai-project';
+  const agentName    = CONTINENT_APPS[continentKey];
   const continentLabel = CONTINENT_NAMES[continentKey] || continentKey;
+
+  const token = await getManagedIdentityToken('https://ai.azure.com', context);
+  if (!token) throw new Error('No ai.azure.com token');
+  const agentsBase = baseEndpoint + '/api/projects/' + projectName + '/agents/v1.0';
+  const h = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+  // 1. エージェント一覧からIDを取得
+  const listRes = await fetch(agentsBase + '/assistants?limit=100', { headers: h });
+  if (!listRes.ok) {
+    const e = await listRes.text().catch(() => '');
+    throw new Error('List assistants failed: ' + listRes.status + ' ' + e.substring(0, 200));
+  }
+  const listData = await listRes.json();
+  const agents = listData.data || listData.value || [];
+  if (context) context.log('[thread] agents list count:', agents.length, 'names:', agents.map(a => a.name).join(','));
+  const agent = agents.find(a => a.name === agentName);
+  if (!agent) throw new Error('Agent not found in list: ' + agentName + ' available=' + agents.map(a => a.name).join(','));
+  if (context) context.log('[thread] found agent id:', agent.id, 'instructions.len:', (agent.instructions || '').length);
+  if (_debug) _debug.push('agent-id:' + agent.id);
+
+  // 2. スレッド作成
+  const threadRes = await fetch(agentsBase + '/threads', { method: 'POST', headers: h, body: '{}' });
+  if (!threadRes.ok) throw new Error('Create thread failed: ' + threadRes.status);
+  const thread = await threadRes.json();
+  if (context) context.log('[thread] thread id:', thread.id);
+
+  // 3. ユーザーメッセージ追加
   const interestsLine = input.interests ? '\n今興味があること: ' + input.interests : '';
   const userMessage = 'ユーザーMBTI: ' + JSON.stringify(input.mtbi) +
-    '\n選択した大陸: ' + continentLabel +
-    interestsLine +
+    '\n選択した大陸: ' + continentLabel + interestsLine +
     '\n回答: ' + JSON.stringify(input.answers || []);
-
-  const body = JSON.stringify({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessage },
-    ],
-    temperature: 0.8,
-    max_tokens: 1024,
+  const msgRes = await fetch(agentsBase + '/threads/' + thread.id + '/messages', {
+    method: 'POST', headers: h, body: JSON.stringify({ role: 'user', content: userMessage }),
   });
+  if (!msgRes.ok) throw new Error('Add message failed: ' + msgRes.status);
+
+  // 4. Run作成
+  const runRes = await fetch(agentsBase + '/threads/' + thread.id + '/runs', {
+    method: 'POST', headers: h, body: JSON.stringify({ assistant_id: agent.id }),
+  });
+  if (!runRes.ok) {
+    const re = await runRes.text().catch(() => '');
+    throw new Error('Create run failed: ' + runRes.status + ' ' + re.substring(0, 200));
+  }
+  let run = await runRes.json();
+  if (context) context.log('[thread] run id:', run.id, 'status:', run.status);
+
+  // 5. 完了までポーリング（最大45秒）
+  const maxWait = 45000;
+  const pollStart = Date.now();
+  const terminal = ['completed', 'failed', 'cancelled', 'expired'];
+  while (!terminal.includes(run.status) && Date.now() - pollStart < maxWait) {
+    await new Promise(r => setTimeout(r, 1500));
+    const pollRes = await fetch(agentsBase + '/threads/' + thread.id + '/runs/' + run.id, { headers: h });
+    if (pollRes.ok) run = await pollRes.json();
+    if (context) context.log('[thread] poll status:', run.status);
+  }
+  if (run.status !== 'completed') throw new Error('Run ended with status: ' + run.status);
+
+  // 6. メッセージ取得
+  const msgsRes = await fetch(agentsBase + '/threads/' + thread.id + '/messages', { headers: h });
+  if (!msgsRes.ok) throw new Error('Get messages failed: ' + msgsRes.status);
+  const msgsData = await msgsRes.json();
+  const assistantMsg = (msgsData.data || []).find(m => m.role === 'assistant');
+  let content = '';
+  if (assistantMsg && Array.isArray(assistantMsg.content)) {
+    for (const c of assistantMsg.content) {
+      if (c.type === 'text' && c.text && c.text.value) content += c.text.value;
+    }
+  }
+  if (context) context.log('[thread] response (first 500):', content.substring(0, 500));
+  if (_debug) _debug.push('mode:thread-run:' + continentKey);
+
+  // 7. スレッド削除（fire & forget）
+  fetch(agentsBase + '/threads/' + thread.id, { method: 'DELETE', headers: h }).catch(() => {});
+
+  return parseAgentResponse(content, continentLabel, context);
+}
+
+// 単一大陸: Thread+RunでFoundry直接実行を試み、失敗時はChat Completions + 定義取得にフォールバック
+async function callSingleAgent(continentKey, input, context, _debug) {
+  const continentLabel = CONTINENT_NAMES[continentKey] || continentKey;
+
+  // --- 方式1: Foundry Thread+Run（Foundryの設定プロンプトをそのまま使用）---
+  try {
+    const result = await callSingleAgentViaThreadRun(continentKey, input, context, _debug);
+    if (context) context.log('[single] Thread+Run succeeded for', continentKey);
+    return result;
+  } catch (e) {
+    if (context) context.log('[single] Thread+Run failed:', e.message, '→ fallback to Chat Completions');
+    if (_debug) _debug.push('thread-run-failed:' + e.message);
+  }
+
+  // --- 方式2: Chat Completions + Foundry定義からinstructions取得 ---
+  const baseEndpoint = process.env.OPENAI_ENDPOINT || 'https://trialquestopenai.services.ai.azure.com';
+  let systemPrompt = null;
+  let deploymentModel = process.env.CHAT_DEPLOYMENT || 'gpt-4o-mini';
+  try {
+    const agentDef = await getAgentDefinition(continentKey, context);
+    if (agentDef.instructions) { systemPrompt = agentDef.instructions; }
+    if (agentDef.model) deploymentModel = agentDef.model;
+    if (_debug) _debug.push('def-instructions:' + (systemPrompt ? 'len=' + systemPrompt.length : 'empty'));
+  } catch (e) {
+    if (context) context.log('[single] getAgentDefinition failed:', e.message);
+    if (_debug) _debug.push('def-failed:' + e.message);
+  }
+  if (!systemPrompt) {
+    if (context) context.log('[single] Using default prompt for', continentKey);
+    if (_debug) _debug.push('mode:default-prompt');
+    systemPrompt = 'あなたは' + continentLabel + 'のAIエージェントです。ユーザーのMBTIタイプと回答を踏まえ、具体的で実行しやすい行動提案を3〜5つJSON配列 [{"name":"' + continentLabel + '","action":"提案内容"},...] 形式のみで返してください。';
+  } else {
+    if (_debug) _debug.push('mode:chat-completions-with-def:' + continentKey);
+  }
+
+  const deployment = deploymentModel;
+  const url = baseEndpoint + '/openai/deployments/' + deployment + '/chat/completions?api-version=2024-12-01-preview';
+  const interestsLine = input.interests ? '\n今興味があること: ' + input.interests : '';
+  const userMessage = 'ユーザーMBTI: ' + JSON.stringify(input.mtbi) +
+    '\n選択した大陸: ' + continentLabel + interestsLine +
+    '\n回答: ' + JSON.stringify(input.answers || []);
 
   const token = await getManagedIdentityToken('https://cognitiveservices.azure.com', context);
   if (!token) throw new Error('MI token for cognitiveservices.azure.com failed');
 
-  if (context) context.log('Calling single agent via Chat Completions:', continentKey, 'model=', deployment);
-  if (_debug) _debug.push('mode:single-agent-foundry-instructions:' + continentKey + ':model=' + deployment);
-
+  if (context) context.log('[single] Calling Chat Completions:', continentKey, 'model=', deployment);
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-    body,
+    body: JSON.stringify({ messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }], temperature: 0.8, max_tokens: 1024 }),
   });
-
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    if (_debug) _debug.push('error:' + response.status);
     throw new Error('Chat API error: ' + response.status + ' ' + text.substring(0, 200));
   }
-
   const data = await response.json();
   const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-  if (context) context.log('Single agent response (first 500):', content.substring(0, 500));
-  if (_debug) _debug.push('agent:' + continentKey + ':instructions-from-foundry');
-
+  if (context) context.log('[single] Chat Completions response (first 500):', content.substring(0, 500));
   return parseAgentResponse(content, continentLabel, context);
 }
 
