@@ -1,4 +1,38 @@
 {
+  "auth": {
+    "identityProviders": {
+      "github": {
+        "registration": {
+          "clientIdSettingName": "GITHUB_CLIENT_ID",
+          "clientSecretSettingName": "GITHUB_CLIENT_SECRET"
+        }
+      }
+    }
+  },
+  "routes": [
+    {
+      "route": "/login",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/.auth/*",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/*",
+      "allowedRoles": ["authenticated"]
+    }
+  ],
+  "responseOverrides": {
+    "401": {
+      "rewrite": "/login",
+      "statusCode": 200
+    }
+  },
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [

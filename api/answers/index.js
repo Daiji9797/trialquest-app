@@ -1,6 +1,27 @@
 import { app } from '@azure/functions';
 import { CosmosClient } from '@azure/cosmos';
 
+function getClientPrincipal(request) {
+  const header = request.headers.get('x-ms-client-principal');
+  if (!header) return null;
+  try {
+    return JSON.parse(Buffer.from(header, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function isAnonymousId(userId) {
+  return typeof userId === 'string' && /^user-[0-9a-z]{8}$/.test(userId);
+}
+
+function checkAuthorized(principal, userId) {
+  if (principal?.userId) {
+    return principal.userId === userId;
+  }
+  return isAnonymousId(userId);
+}
+
 function getContainer() {
   const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
   return client.database('trialquest-db').container('answers');
@@ -30,6 +51,15 @@ app.http('answers', {
       if (request.method === 'POST') {
         const body = await request.json();
         const userId = body?.userId;
+
+        const principal = getClientPrincipal(request);
+        if (!checkAuthorized(principal, userId)) {
+          return {
+            status: 403,
+            body: JSON.stringify({ error: 'Forbidden' }),
+            headers: corsHeaders,
+          };
+        }
         const questionId = body?.questionId;
         const answerText = body?.answer;
 
@@ -65,6 +95,16 @@ app.http('answers', {
 
       if (request.method === 'GET') {
         const userId = request.query.get('userId');
+
+        const principal = getClientPrincipal(request);
+        if (!checkAuthorized(principal, userId)) {
+          return {
+            status: 403,
+            body: JSON.stringify({ error: 'Forbidden' }),
+            headers: corsHeaders,
+          };
+        }
+
         if (!userId) {
           return {
             status: 400,
