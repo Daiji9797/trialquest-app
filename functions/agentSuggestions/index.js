@@ -39,43 +39,97 @@ async function getAgentDefinition(continentKey, context) {
   const token = await getManagedIdentityToken('https://ai.azure.com', context);
   if (!token) throw new Error('MI token failed for agent definition fetch');
 
-  let agentData = null;
+  // Helper: extract instructions+model from an agent object
+  const extract = (d) => ({
+    instructions: d.instructions
+      || (d.versions && d.versions.latest && d.versions.latest.definition && d.versions.latest.definition.instructions)
+      || '',
+    model: d.model
+      || (d.versions && d.versions.latest && d.versions.latest.definition && d.versions.latest.definition.model)
+      || '',
+  });
 
-  // Try direct fetch by agent name
-  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-  if (res.ok) {
-    agentData = await res.json();
-    if (context) context.log('Agent direct fetch OK for', agentName, 'keys:', Object.keys(agentData).join(','));
-  } else {
-    const errText = await res.text().catch(() => '');
-    if (context) context.log('Agent direct fetch failed', res.status, errText.substring(0, 300));
-    // Fallback: list all agents and find by name
-    const listUrl = baseEndpoint + '/api/projects/' + projectName + '/agents?api-version=2025-05-15-preview';
-    const listRes = await fetch(listUrl, { headers: { Authorization: 'Bearer ' + token } });
-    if (listRes.ok) {
-      const listData = await listRes.json();
-      if (context) context.log('Agent list keys:', Object.keys(listData).join(','));
-      const agents = listData.value || listData.data || listData.agents || listData.items || [];
-      if (context) context.log('Agent list count:', agents.length, 'names:', agents.slice(0,10).map(a => a.name || a.id).join(','));
-      agentData = agents.find(a => a.name === agentName) || null;
-      if (!agentData) {
-        if (context) context.log('Agent not found by name. Available names:', agents.map(a => a.name).join(','));
-        throw new Error('Agent not found in list: ' + agentName);
+  // Helper: fetch detail by ID
+  const fetchById = async (id, tkn) => {
+    const u = baseEndpoint + '/api/projects/' + projectName + '/agents/' + id + '?api-version=2025-05-15-preview';
+    const r = await fetch(u, { headers: { Authorization: 'Bearer ' + tkn } });
+    if (!r.ok) { if (context) context.log('fetchById failed', id, r.status); return null; }
+    return r.json();
+  };
+
+  // --- Attempt 1: Foundry project API (ai.azure.com token) ---
+  let instructions = '';
+  let model = '';
+  const aiToken = await getManagedIdentityToken('https://ai.azure.com', context);
+  if (aiToken) {
+    // 1a: direct fetch by name
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + aiToken } });
+    if (res.ok) {
+      const d = await res.json();
+      if (context) context.log('[def] direct OK keys:', Object.keys(d).join(','), 'body:', JSON.stringify(d).substring(0, 300));
+      const ex = extract(d);
+      if (ex.instructions) { instructions = ex.instructions; model = ex.model; }
+      else if (d.id) {
+        // 1b: direct had no instructions, fetch detail by ID
+        const d2 = await fetchById(d.id, aiToken);
+        if (d2) { const ex2 = extract(d2); instructions = ex2.instructions; model = ex2.model; }
+        if (context) context.log('[def] detail by id instructions.len=', instructions.length);
       }
     } else {
-      const listErr = await listRes.text().catch(() => '');
-      if (context) context.log('Agent list also failed', listRes.status, listErr.substring(0, 200));
-      throw new Error('Agent fetch failed: ' + res.status);
+      const errText = await res.text().catch(() => '');
+      if (context) context.log('[def] direct failed', res.status, errText.substring(0, 300));
+    }
+
+    // 1c: if still no instructions, list all agents
+    if (!instructions) {
+      const listUrl = baseEndpoint + '/api/projects/' + projectName + '/agents?api-version=2025-05-15-preview';
+      const listRes = await fetch(listUrl, { headers: { Authorization: 'Bearer ' + aiToken } });
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        if (context) context.log('[def] list OK body:', JSON.stringify(listData).substring(0, 400));
+        const agents = listData.value || listData.data || listData.agents || listData.items || [];
+        if (context) context.log('[def] list count:', agents.length, 'names:', agents.map(a => a.name).join(','));
+        const found = agents.find(a => a.name === agentName);
+        if (found) {
+          const ex3 = extract(found);
+          if (ex3.instructions) { instructions = ex3.instructions; model = ex3.model; }
+          else if (found.id) {
+            // fetch detail by the found ID
+            const d3 = await fetchById(found.id, aiToken);
+            if (d3) { if (context) context.log('[def] list detail body:', JSON.stringify(d3).substring(0, 300)); const ex4 = extract(d3); instructions = ex4.instructions; model = ex4.model; }
+            if (context) context.log('[def] detail from list id instructions.len=', instructions.length);
+          }
+        } else {
+          if (context) context.log('[def] agent not found in list. available:', agents.map(a=>a.name).join(','));
+        }
+      } else {
+        const le = await listRes.text().catch(() => '');
+        if (context) context.log('[def] list failed', listRes.status, le.substring(0, 200));
+      }
     }
   }
 
-  const instructions = agentData.instructions
-    || (agentData.versions && agentData.versions.latest && agentData.versions.latest.definition && agentData.versions.latest.definition.instructions)
-    || '';
-  const model = agentData.model
-    || (agentData.versions && agentData.versions.latest && agentData.versions.latest.definition && agentData.versions.latest.definition.model)
-    || '';
-  if (context) context.log('Fetched definition for', agentName, 'model=', model, 'instructions.len=', instructions.length);
+  // --- Attempt 2: Azure OpenAI Assistants API (cognitiveservices token) ---
+  if (!instructions) {
+    const cogToken = await getManagedIdentityToken('https://cognitiveservices.azure.com', context);
+    if (cogToken) {
+      const aoaiListUrl = baseEndpoint + '/openai/assistants?api-version=2024-05-01-preview';
+      const aoaiRes = await fetch(aoaiListUrl, { headers: { Authorization: 'Bearer ' + cogToken } });
+      if (aoaiRes.ok) {
+        const aoaiData = await aoaiRes.json();
+        if (context) context.log('[def] AOAI assistants body:', JSON.stringify(aoaiData).substring(0, 400));
+        const aoaiAgents = aoaiData.data || aoaiData.value || [];
+        const aoaiFound = aoaiAgents.find(a => a.name === agentName);
+        if (aoaiFound) { const ex5 = extract(aoaiFound); instructions = ex5.instructions; model = ex5.model; }
+        if (context) context.log('[def] AOAI found:', !!aoaiFound, 'instructions.len=', instructions.length);
+      } else {
+        const ae = await aoaiRes.text().catch(() => '');
+        if (context) context.log('[def] AOAI list failed', aoaiRes.status, ae.substring(0, 200));
+      }
+    }
+  }
+
+  if (context) context.log('[def] FINAL for', agentName, 'instructions.len=', instructions.length, 'model=', model);
   const entry = { instructions, model, ts: Date.now() };
   _agentCache[continentKey] = entry;
   return entry;
@@ -99,9 +153,20 @@ async function callSingleAgent(continentKey, input, context, _debug) {
   const baseEndpoint = process.env.OPENAI_ENDPOINT || 'https://trialquestopenai.services.ai.azure.com';
 
   // Foundry エージェント定義から instructions と model を取得（5分キャッシュ）
-  const agentDef = await getAgentDefinition(continentKey, context);
-  const systemPrompt = agentDef.instructions;
-  if (!systemPrompt) throw new Error('Empty instructions for ' + continentKey);
+  let systemPrompt = null;
+  try {
+    const agentDef = await getAgentDefinition(continentKey, context);
+    systemPrompt = agentDef.instructions || null;
+    if (_debug) _debug.push('instructions:' + (systemPrompt ? 'from-foundry:len=' + systemPrompt.length : 'empty'));
+  } catch (e) {
+    if (context) context.log('[single] getAgentDefinition error:', e.message);
+    if (_debug) _debug.push('instructions-fetch-error:' + e.message);
+  }
+  if (!systemPrompt) {
+    if (context) context.log('[single] No Foundry instructions for', continentKey, '- using default prompt');
+    if (_debug) _debug.push('instructions:default-fallback');
+    systemPrompt = 'あなたは' + (CONTINENT_NAMES[continentKey] || continentKey) + 'のAIエージェントです。ユーザーのMBTIタイプと質問への回答をもとに、具体的で実行しやすい行動提案を3つ考えてください。必ずJSON配列 [{"name":"大陸名","action":"提案内容"},...] の形式のみで返してください。余分な説明は不要です。';
+  }
 
   // Foundry 定義の model を優先し、未設定の場合は env var / デフォルト値にフォールバック
   const deployment = agentDef.model || process.env.CHAT_DEPLOYMENT || 'gpt-4o-mini';
