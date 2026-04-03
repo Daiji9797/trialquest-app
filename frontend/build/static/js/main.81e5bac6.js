@@ -30,9 +30,9 @@ var _ds=(0,r.useState)(_lsInit?(_lsInit.deleted||{}):{}),deletedSugs=_ds[0],setD
 var _cs=(0,r.useState)(_lsInit?(_lsInit.conductorSummary||null):null),conductorSummary=_cs[0],setConductorSummary=_cs[1];
 var _csRef=(0,r.useRef)(_lsInit?(_lsInit.conductorSummary||null):null);
 var _css=(0,r.useState)(_lsInit?(_lsInit.conductorStatus||null):null),conductorStatus=_css[0],setConductorStatus=_css[1];
-var _cssRef=(0,r.useRef)(_lsInit?(_lsInit.conductorStatus||null):null);
+var _cssRef=(0,r.useRef)(_lsInit?(_lsInit.conductorStatus||null):null);var _ci=(0,r.useState)(_lsInit?(_lsInit.conductorItems||[]):[]),conductorItems=_ci[0],setConductorItems=_ci[1];var _ciRef=(0,r.useRef)(_lsInit?(_lsInit.conductorItems||[]):[]);
 var _init=(0,r.useRef)(!!_lsInit);
-var _saveSugs=function(items,statuses,deleted){if(!items||items.length===0)return;var _d={items:items,statuses:statuses||{},deleted:deleted||{},conductorSummary:_csRef.current||null,conductorStatus:_cssRef.current||null};try{localStorage.setItem(_lsKeyRef.current,JSON.stringify(_d));}catch(e){console.error('[TQ] LS save failed',e);}fetch(Lt("/userProfile/"+_uidRef.current),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggestions:_d})}).then(function(r){if(!r.ok)console.error('[TQ] CosmosDB save failed',r.status);}).catch(function(e){console.error('[TQ] CosmosDB fetch error',e);});};
+var _saveSugs=function(items,statuses,deleted){if(!items||items.length===0)return;var _d={items:items,statuses:statuses||{},deleted:deleted||{},conductorSummary:_csRef.current||null,conductorStatus:_cssRef.current||null,conductorItems:_ciRef.current||[]};try{localStorage.setItem(_lsKeyRef.current,JSON.stringify(_d));}catch(e){console.error('[TQ] LS save failed',e);}fetch(Lt("/userProfile/"+_uidRef.current),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({suggestions:_d})}).then(function(r){if(!r.ok)console.error('[TQ] CosmosDB save failed',r.status);}).catch(function(e){console.error('[TQ] CosmosDB fetch error',e);});};
 
 var fallback=function(mtbi,ans,conts){
 var txt=(ans||[]).map(function(a){return(a.title||"")+" "+(a.answer||"")}).join(" ").toLowerCase();
@@ -45,14 +45,14 @@ if(!mtbi)return void setSuggestions([]);
 var cc=conts&&conts.length>0?conts:[];
 if(cc.length===0)return;
 var _prevSugs=suggestions.slice();var _prevSt=Object.assign({},sugStatus);var _prevDel=Object.assign({},deletedSugs);
-return fetch(Lt("/agentSuggestions"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:_uidRef.current,mtbi:mtbi,answers:ans,continents:cc,interests:interests})}).then(function(res){if(!res.ok)throw new Error("err");return res.json()}).then(function(data){var _csum=data.conductorSummary||null;setConductorSummary(_csum);_csRef.current=_csum;if(!_csum){setConductorStatus(null);_cssRef.current=null;}var _new=Array.isArray(data&&data.suggestions)&&data.suggestions.length>0?data.suggestions:fallback(mtbi,ans,cc);var _ea=_prevSugs.map(function(s){return s.action;});var _add=_new.filter(function(s){return _ea.indexOf(s.action)===-1;});var _merged=_prevSugs.concat(_add);setSuggestions(_merged);_saveSugs(_merged,_prevSt,_prevDel);_init.current=true;}).catch(function(){var _new=fallback(mtbi,ans,cc);var _ea=_prevSugs.map(function(s){return s.action;});var _add=_new.filter(function(s){return _ea.indexOf(s.action)===-1;});var _merged=_prevSugs.concat(_add);setSuggestions(_merged);_saveSugs(_merged,_prevSt,_prevDel);_init.current=true;});
+return fetch(Lt("/agentSuggestions"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:_uidRef.current,mtbi:mtbi,answers:ans,continents:cc,interests:interests})}).then(function(res){if(!res.ok)throw new Error("err");return res.json()}).then(function(data){var _csum=data.conductorSummary||null;setConductorSummary(_csum);_csRef.current=_csum;if(!_csum){setConductorStatus(null);_cssRef.current=null;}if(_csum&&!_ciRef.current.some(function(x){return x.text===_csum;})){var _nc=_ciRef.current.concat([{text:_csum,status:null,deleted:false}]);_ciRef.current=_nc;setConductorItems(_nc);}var _new=Array.isArray(data&&data.suggestions)&&data.suggestions.length>0?data.suggestions:fallback(mtbi,ans,cc);var _ea=_prevSugs.map(function(s){return s.action;});var _add=_new.filter(function(s){return _ea.indexOf(s.action)===-1;});var _merged=_prevSugs.concat(_add);setSuggestions(_merged);_saveSugs(_merged,_prevSt,_prevDel);_init.current=true;}).catch(function(){var _new=fallback(mtbi,ans,cc);var _ea=_prevSugs.map(function(s){return s.action;});var _add=_new.filter(function(s){return _ea.indexOf(s.action)===-1;});var _merged=_prevSugs.concat(_add);setSuggestions(_merged);_saveSugs(_merged,_prevSt,_prevDel);_init.current=true;});
 };
 
 (0,r.useEffect)(function(){
 fetch("/.auth/me").then(function(res){return res.ok?res.json():null;}).then(function(authData){
 var uid=(authData&&authData.clientPrincipal&&authData.clientPrincipal.userId)||null;
 if(uid){_uidRef.current=uid;_lsKeyRef.current='tq-sug-'+uid;localStorage.setItem(Mt,uid);}
-if(uid&&uid!==E){setSuggestions([]);setSugStatus({});setDeletedSugs({});setConductorSummary(null);_csRef.current=null;setConductorStatus(null);_cssRef.current=null;}
+if(uid&&uid!==E){setSuggestions([]);setSugStatus({});setDeletedSugs({});setConductorSummary(null);_csRef.current=null;setConductorStatus(null);_cssRef.current=null;setConductorItems([]);_ciRef.current=[];}
 var _uid=_uidRef.current;
 Promise.all([
 fetch(Lt("/userProfile/"+_uid)).then(function(res){if(res.status===404)return null;if(!res.ok)throw new Error("profile fetch failed");return res.json()}),
@@ -60,7 +60,7 @@ fetch(Lt("/answers?userId="+_uid)).then(function(res){return res.ok?res.json():[
 ]).then(function(results){
 var p=results[0],ans=results[1]||[];
 setProfile(p);setAnswers(ans);
-if(p&&p.mtbi){a({EI:p.mtbi.EI||50,SN:p.mtbi.SN||50,TF:p.mtbi.TF||50,JP:p.mtbi.JP||50});}if(!_lsInit||(uid&&uid!==E)){var _dbSug=(p&&p.suggestions&&Array.isArray(p.suggestions.items)&&p.suggestions.items.length>0)?p.suggestions:null;if(_dbSug){setSuggestions(_dbSug.items);setSugStatus(_dbSug.statuses||{});setDeletedSugs(_dbSug.deleted||{});var _csum=_dbSug.conductorSummary||null;if(_csum){setConductorSummary(_csum);_csRef.current=_csum;}var _cst=_dbSug.conductorStatus||null;if(_cst){setConductorStatus(_cst);_cssRef.current=_cst;}try{localStorage.setItem(_lsKey,JSON.stringify(_dbSug));}catch(e){}}}_init.current=true;
+if(p&&p.mtbi){a({EI:p.mtbi.EI||50,SN:p.mtbi.SN||50,TF:p.mtbi.TF||50,JP:p.mtbi.JP||50});}if(!_lsInit||(uid&&uid!==E)){var _dbSug=(p&&p.suggestions&&Array.isArray(p.suggestions.items)&&p.suggestions.items.length>0)?p.suggestions:null;if(_dbSug){setSuggestions(_dbSug.items);setSugStatus(_dbSug.statuses||{});setDeletedSugs(_dbSug.deleted||{});var _csum=_dbSug.conductorSummary||null;if(_csum){setConductorSummary(_csum);_csRef.current=_csum;}var _cst=_dbSug.conductorStatus||null;if(_cst){setConductorStatus(_cst);_cssRef.current=_cst;}var _ci2=_dbSug.conductorItems||[];if(_ci2.length===0&&_csum){_ci2=[{text:_csum,status:_cst||null,deleted:false}];}setConductorItems(_ci2);_ciRef.current=_ci2;try{localStorage.setItem(_lsKey,JSON.stringify(_dbSug));}catch(e){}}}_init.current=true;
 setLoading(false);
 }).catch(function(e){console.error(e);setLoading(false)});
 }).catch(function(){setLoading(false)});
